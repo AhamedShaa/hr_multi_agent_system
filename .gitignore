@@ -1,0 +1,28 @@
+# Environment / secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+
+# Test / cache artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Database & runtime artifacts
+*.db
+*.sqlite
+*.sqlite3
+audit_fallback.jsonl
+
+# Editor / OS
+.vscode/
+.idea/
+*.DS_Store
