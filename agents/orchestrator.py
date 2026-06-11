@@ -23,6 +23,7 @@ from database.db import SessionLocal, create_all_tables
 from memory.manager import MemoryManager
 from mock_data.employees import get_employee
 from schemas.models import AgentResponse, AuditEntry, IntentResult, MemoryContext, ProcessResponse
+from utils.guardrails import validate_input
 
 
 class OrchestrationState(TypedDict):
@@ -161,6 +162,26 @@ class Orchestrator:
         """Run the HR orchestration graph and return a user-safe process response."""
         start_time = time.time()
         logger.info("Orchestrator.run start request_id=%s user_id=%s", session_id, user_id)
+
+        is_valid, rejection_reason, rejection_message = validate_input(message)
+        if not is_valid:
+            return ProcessResponse(
+                request_id=session_id,
+                intent=IntentResult(
+                    intent="out_of_scope",
+                    confidence=1.0,
+                    entities={},
+                    reasoning=rejection_reason,
+                ),
+                response=AgentResponse(
+                    agent_name="Guardrail",
+                    response=rejection_message,
+                    status="clarification_needed",
+                    data={"rejection_reason": rejection_reason},
+                ),
+                processing_time_ms=0,
+            )
+
         initial_state: OrchestrationState = {
             "user_id": user_id,
             "session_id": session_id,
@@ -230,7 +251,8 @@ class Orchestrator:
         """Build the OpenAI chat model from environment settings."""
         return ChatOpenAI(
             model=settings.model_name,
-            api_key=settings.openai_api_key or "missing-openai-api-key",
+            api_key=settings.openrouter_api_key or "missing-openrouter-api-key",
+            base_url="https://openrouter.ai/api/v1",
         )
 
     async def _execute_agent(self, agent: Any, state: OrchestrationState) -> AgentResponse:

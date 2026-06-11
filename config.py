@@ -18,9 +18,8 @@ class Settings(BaseSettings):
     """
 
     # ── LLM ──────────────────────────────────────────────────────────────────
-    openai_api_key: str = ""
-    anthropic_api_key: str = ""
-    model_name: str = "gpt-4o-mini"
+    openrouter_api_key: str = ""
+    model_name: str = "openai/gpt-4o-mini"
 
     # ── Intent Classifier ────────────────────────────────────────────────────
     classifier_confidence_threshold: float = 0.6

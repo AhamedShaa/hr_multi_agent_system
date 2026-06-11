@@ -20,33 +20,37 @@ memory store and an append-only audit log track every interaction.
   database is unavailable.
 - **Resilient by design**: every LLM call is wrapped with a timeout and retry
   decorator; memory/audit failures degrade gracefully instead of failing the request.
+- **Input guardrails**: incoming messages are checked for domain relevance and
+  prompt-injection attempts before the pipeline runs (`utils/guardrails.py`).
 - **Centralized configuration** via [pydantic-settings](https://docs.pydantic.dev/latest/concepts/pydantic_settings/)
   (`config.py`) and externalized prompt templates (`prompts/`).
 
 ## Architecture
 
-```
-HTTP Client ──POST /process──► FastAPI ──► Orchestrator (LangGraph)
-                                                  │
-                          ┌───────────────────────┴────────────────────────┐
-                          ▼                                                 │
-                 retrieve_memory_node ──► STMManager + LTMManager (SQLite)  │
-                          │                                                 │
-                          ▼                                                 │
-                 classify_intent_node ──► IntentClassifier (LLM)            │
-                          │                                                 │
-            ┌─────────────┼─────────────────┬──────────────────┐           │
-            ▼              ▼                ▼                  ▼           │
-      LeaveAgent   SchedulingAgent   ComplianceAgent   ClarificationAgent   │
-            └─────────────┴────────────────┴──────────────────┘            │
-                          │                                                 │
-                          ▼                                                 │
-                   finalize_node ──► STM store / LTM promote + AuditLogger ─┘
-                          │
-                  ProcessResponse
-```
+### Request Processing Workflow
 
-See [REPORT.md](REPORT.md) for the full design rationale and trade-offs.
+The diagram below shows the end-to-end path of a request, from the moment it
+hits the FastAPI layer to the response being returned to the client. Every
+request is logged and validated, then passed through the guardrail check
+(`utils/guardrails.py`) before the LangGraph workflow is invoked. Requests
+that fail the guardrail check (off-topic or prompt-injection attempts) skip
+the LangGraph workflow entirely and return a rejection response directly.
+
+![Request processing workflow](arch2.png)
+
+### LangGraph Agent Orchestration Workflow
+
+Once a request passes the guardrail check, it enters the LangGraph state
+machine (`agents/orchestrator.py`). The graph retrieves conversation memory,
+classifies the user's intent with an LLM, and routes to the matching
+sub-agent (Leave, Scheduling, Compliance, or Clarification). After the agent
+produces a response, the graph finalizes by updating short-term memory,
+promoting significant interactions to long-term memory, and writing an audit
+log entry.
+
+![LangGraph agent orchestration workflow](arch3.png)
+
+See [report/Technical_report.pdf](report/Technical_report.pdf) for the full design rationale and trade-offs.
 
 ## Project Structure
 
@@ -73,7 +77,9 @@ hr_agent_system/
 ├── prompts/                   # Externalized prompt/response templates
 ├── schemas/models.py          # Pydantic request/response schemas
 ├── mock_data/employees.py     # Mock employee directory
-├── utils/retry.py             # Async retry decorator
+├── utils/
+│   ├── retry.py               # Async retry decorator
+│   └── guardrails.py          # Domain & prompt-injection input validation
 └── tests/test_pipeline.py     # End-to-end pipeline tests
 ```
 
@@ -82,7 +88,7 @@ hr_agent_system/
 ### Prerequisites
 
 - Python 3.11+
-- An OpenAI API key (for intent classification and the clarification agent)
+- An [OpenRouter](https://openrouter.ai/) API key (for intent classification and the sub-agents)
 
 ### Installation
 
@@ -103,7 +109,7 @@ Copy the example environment file and fill in your values:
 cp .env.example .env
 ```
 
-At minimum, set `OPENAI_API_KEY`. All other settings have sensible defaults — see
+At minimum, set `OPENROUTER_API_KEY`. All other settings have sensible defaults — see
 `.env.example` for the full list of configurable values (timeouts, retry counts,
 memory limits, CORS origins, etc.). Configuration is loaded once at startup via
 `config.py` (`pydantic-settings`); no other module reads environment variables
@@ -156,7 +162,7 @@ The test suite mocks LLM calls, so it runs without requiring a live OpenAI quota
 ## Tech Stack
 
 - **FastAPI** + **Uvicorn** — HTTP API
-- **LangGraph** + **LangChain (OpenAI)** — agent orchestration and LLM calls
+- **LangGraph** + **LangChain (OpenAI client via OpenRouter)** — agent orchestration and LLM calls
 - **SQLAlchemy** + **SQLite** — persistence (memory, audit log)
 - **Pydantic v2 / pydantic-settings** — schemas and configuration
 - **pytest / pytest-asyncio** — testing
